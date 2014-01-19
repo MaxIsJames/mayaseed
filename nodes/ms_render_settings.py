@@ -316,6 +316,12 @@ def ms_renderSettings_nodeInitializer():
     force_linear_color_interpretation_nAttr = OpenMaya.MFnNumericAttribute()
     ms_renderSettings.force_linear_color_interpretation = force_linear_color_interpretation_nAttr.create("force_linear_color_interpretation", "force_linear_color_interpretation", OpenMaya.MFnNumericData.kBoolean, False)
     ms_renderSettings.addAttribute(ms_renderSettings.force_linear_color_interpretation)
+    
+    # render layer glob
+    render_layers_string = OpenMaya.MFnStringData().create()
+    render_layers_Attr = OpenMaya.MFnTypedAttribute()
+    ms_renderSettings.render_layers = render_layers_Attr.create("render_layers", "render_layers", OpenMaya.MFnData.kString, render_layers_string)  
+    ms_renderSettings.addAttribute(ms_renderSettings.render_layers)
 
 
 def initializePlugin(obj):
