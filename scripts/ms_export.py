@@ -34,6 +34,7 @@ import time
 import inspect
 import shutil
 import copy
+import fnmatch
 
 global previous_export
 previous_export = None
@@ -117,6 +118,7 @@ def get_maya_params(render_settings_node):
     params['animation_start_frame'] = cmds.getAttr(render_settings_node + '.animation_start_frame')
     params['animation_end_frame'] = cmds.getAttr(render_settings_node + '.animation_end_frame')
     params['animated_textures'] = cmds.getAttr(render_settings_node + '.export_animated_textures')
+    params['render_layers'] = cmds.getAttr(render_settings_node + '.render_layers')
     params['scene_scale'] = 1.0
 
     if not (params['export_transformation_blur'] or params['export_deformation_blur'] or params['export_camera_blur'] or params['export_animation']):
@@ -1277,9 +1279,13 @@ class AsObject():
         self.file_names = None
         self.instances = []
         self.has_deformation = False
+        self.render_layer = []
+        self.render_layer_list = []
 
     def instantiate(self):
         object_instance = AsObjectInstance(self)
+        if self.name_in_obj in self.render_layer_list:
+            object_instance.render_layer = AsParameter('render_layer', self.render_layer)
         self.instances.append(object_instance)
         return object_instance
 
@@ -1319,9 +1325,12 @@ class AsObjectInstance():
         self.object = as_object
         self.transforms = []
         self.material_assignments = []
+        self.render_layer = None
 
     def emit_xml(self, doc):
         doc.start_element('object_instance name="%s" object="%s.0"' % (self.name, self.object.name))
+        if self.render_layer is not None:
+            self.render_layer.emit_xml(doc) 
         for transform in self.transforms:
             transform.emit_xml(doc)
         for material_assignment in self.material_assignments:
@@ -1920,6 +1929,7 @@ def translate_maya_scene(params, maya_scene, maya_environment):
 
     """ Main function for converting a cached Maya scene into an appleseed object hierarchy """
 
+
     # create dict for storing appleseed object models into
     # the key will be the file path to save the project too
     as_object_models = []
@@ -2046,7 +2056,7 @@ def translate_maya_scene(params, maya_scene, maya_environment):
             for item in bounding_box[1:]:
                 bounding_box_string += ' %.15f' % item
 
-            as_project.scene.parameters.append(AsParameter('bounding_box', bounding_box_string))
+            # as_project.scene.parameters.append(AsParameter('bounding_box', bounding_box_string))
 
         # define root assembly
         root_assembly = AsAssembly(None)
@@ -2254,6 +2264,9 @@ def construct_transform_descendents(params, root_assembly, parent_assembly, matr
     current_assembly = parent_assembly
     current_matrix_stack = matrix_stack + [maya_transform.matrices[non_mb_sample_number]]
 
+    ## Glob Target for render layers
+    render_layer_list = fnmatch.filter(cmds.ls(type = ['mesh','light']), params['render_layers'])
+
     if maya_transform.has_children and maya_transform.visibility_states[non_mb_sample_number]:
 
         if maya_transform.is_animated and transformation_blur:
@@ -2368,6 +2381,8 @@ def construct_transform_descendents(params, root_assembly, parent_assembly, matr
             new_mesh.name = mesh.safe_name
             new_mesh.name_in_obj = mesh.short_name
             new_mesh.has_deformation = mesh.has_deformation
+            new_mesh.render_layer_list = render_layer_list
+            new_mesh.render_layer = params['render_layers']
 
             if not object_blur or not new_mesh.has_deformation:
                 # If the mesh has no deformation there will only be one sample so always take the first sample.
@@ -3050,6 +3065,10 @@ def export_container(render_settings_node):
     params = get_maya_params(render_settings_node)
     maya_scene, maya_environment = get_maya_scene(params)
     scene_cache_finish_time = time.time()
+    
+    print 'PARAMS TEST'
+    print params['render_layers']
+    globbedNames = fnmatch.filter(cmds.ls(type = ['mesh','light']), params['render_layers'])
 
     ms_commands.info('Scene cached for translation in %.2f seconds.' % (scene_cache_finish_time - export_start_time))
 
@@ -3062,6 +3081,7 @@ def export_container(render_settings_node):
 
     # translate maya scene
     as_object_models = translate_maya_scene(params, maya_scene, maya_environment)
+    print as_object_models
     scene_translation_finish_time = time.time()
 
     ms_commands.info('Scene translated in %.2f seconds.' % (scene_translation_finish_time - scene_cache_finish_time))
