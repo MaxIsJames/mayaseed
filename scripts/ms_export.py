@@ -1279,13 +1279,16 @@ class AsObject():
         self.file_names = None
         self.instances = []
         self.has_deformation = False
-        self.render_layer = []
         self.render_layer_list = []
 
     def instantiate(self):
         object_instance = AsObjectInstance(self)
-        if self.name_in_obj in self.render_layer_list:
-            object_instance.render_layer = AsParameter('render_layer', self.render_layer)
+        render_layers = ""
+        for item in self.render_layer_list:
+            if self.name_in_obj in item[1]:
+                render_layers = render_layers + item[0] + " "
+        if render_layers is not []:
+            object_instance.render_layer = AsParameter('render_layer', render_layers)
         self.instances.append(object_instance)
         return object_instance
 
@@ -1506,6 +1509,7 @@ class AsBsdf():
         self.model = None
         self.parameters = []
         self.render_layer = None
+        self.render_layer_list = []
 
     def emit_xml(self, doc):
         doc.start_element('bsdf name="%s" model="%s"' % (self.name, self.model))
@@ -1957,6 +1961,19 @@ def translate_maya_scene(params, maya_scene, maya_environment):
     cmds.progressWindow(e=True, status='Translating maya scene', progress=0, max=len(frame_list))
     cmds.refresh(cv=True)
 
+    ## Assemble render layers lists
+    render_layer_list = []
+    print 'generating render layers'
+    if params['render_layers'] is not []:
+        maya_object_list = cmds.ls(type = ['mesh','light'])
+        for idx,item in enumerate(params['render_layers'].split(',')):
+            item = item.split(':')
+            if len(item) is 1:
+                item.append ("render_layer_" + str(idx + 1))
+            item[0] = item[0].strip()
+            item[1] = item[1].strip()
+            render_layer_list.append([item[1], fnmatch.filter(maya_object_list, item[0])])
+
     for i, frame_number in enumerate(frame_list):
 
         check_export_cancelled()
@@ -2238,7 +2255,7 @@ def translate_maya_scene(params, maya_scene, maya_environment):
         root_assembly.materials.append(default_invisible_material)
 
         for transform in maya_scene:
-            construct_transform_descendents(params, root_assembly, root_assembly, [], transform, mb_sample_number_list, non_mb_sample_number, params['export_camera_blur'], params['export_transformation_blur'], params['export_deformation_blur'])
+            construct_transform_descendents(params, root_assembly, root_assembly, [], transform, mb_sample_number_list, non_mb_sample_number, params['export_camera_blur'], params['export_transformation_blur'], params['export_deformation_blur'], render_layer_list)
 
         # end construction of as project hierarchy ************************************************
 
@@ -2257,15 +2274,12 @@ def translate_maya_scene(params, maya_scene, maya_environment):
 # construct_transform_descendents function.
 #--------------------------------------------------------------------------------------------------
 
-def construct_transform_descendents(params, root_assembly, parent_assembly, matrix_stack, maya_transform, mb_sample_number_list, non_mb_sample_number, camera_blur, transformation_blur, object_blur):
+def construct_transform_descendents(params, root_assembly, parent_assembly, matrix_stack, maya_transform, mb_sample_number_list, non_mb_sample_number, camera_blur, transformation_blur, object_blur, render_layer_list):
 
     """ this function recursively builds an appleseed object hierarchy from a MTransform """
 
     current_assembly = parent_assembly
     current_matrix_stack = matrix_stack + [maya_transform.matrices[non_mb_sample_number]]
-
-    ## Glob Target for render layers
-    render_layer_list = fnmatch.filter(cmds.ls(type = ['mesh','light']), params['render_layers'])
 
     if maya_transform.has_children and maya_transform.visibility_states[non_mb_sample_number]:
 
@@ -2382,7 +2396,6 @@ def construct_transform_descendents(params, root_assembly, parent_assembly, matr
             new_mesh.name_in_obj = mesh.short_name
             new_mesh.has_deformation = mesh.has_deformation
             new_mesh.render_layer_list = render_layer_list
-            new_mesh.render_layer = params['render_layers']
 
             if not object_blur or not new_mesh.has_deformation:
                 # If the mesh has no deformation there will only be one sample so always take the first sample.
@@ -3066,10 +3079,6 @@ def export_container(render_settings_node):
     maya_scene, maya_environment = get_maya_scene(params)
     scene_cache_finish_time = time.time()
     
-    print 'PARAMS TEST'
-    print params['render_layers']
-    globbedNames = fnmatch.filter(cmds.ls(type = ['mesh','light']), params['render_layers'])
-
     ms_commands.info('Scene cached for translation in %.2f seconds.' % (scene_cache_finish_time - export_start_time))
 
     # copy area light primitives into export directory
