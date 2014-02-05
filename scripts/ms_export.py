@@ -280,7 +280,7 @@ def get_maya_scene(params):
         initial_sample = (frame_sample_number == 1)
 
         for transform in maya_root_transforms:
-            add_scene_sample(transform, params['export_transformation_blur'], params['export_deformation_blur'], params['export_camera_blur'], current_frame, start_frame, frame_sample_number, initial_sample, params['output_directory'])
+            add_scene_sample(transform, params['export_transformation_blur'], params['export_deformation_blur'], params['export_camera_blur'], current_frame, start_frame, frame_sample_number, initial_sample, params['output_directory'], params)
 
         frame_sample_number += 1
         if frame_sample_number == params['motion_samples']:
@@ -304,7 +304,7 @@ def get_maya_scene(params):
 # add_scene_sample function.
 #--------------------------------------------------------------------------------------------------
 
-def add_scene_sample(m_transform, transform_blur, deform_blur, camera_blur, current_frame, start_frame, frame_sample_number, initial_sample, export_root):
+def add_scene_sample(m_transform, transform_blur, deform_blur, camera_blur, current_frame, start_frame, frame_sample_number, initial_sample, export_root, params):
 
     check_export_cancelled()
 
@@ -318,7 +318,7 @@ def add_scene_sample(m_transform, transform_blur, deform_blur, camera_blur, curr
             # Only add a sample if this is the first frame to be exported or if it has some deformation
             if mesh.has_deformation or (current_frame == start_frame):
                 if initial_sample:
-                    mesh.add_deform_sample(export_root, current_frame)
+                    mesh.add_deform_sample(export_root, current_frame, params)
 
     for mesh in m_transform.child_meshes:
         if (frame_sample_number == 1) or initial_sample:
@@ -344,7 +344,7 @@ def add_scene_sample(m_transform, transform_blur, deform_blur, camera_blur, curr
             camera.add_focal_distance_sample()
 
     for transform in m_transform.child_transforms:
-        add_scene_sample(transform, transform_blur, deform_blur, camera_blur, current_frame, start_frame, frame_sample_number, initial_sample, export_root)
+        add_scene_sample(transform, transform_blur, deform_blur, camera_blur, current_frame, start_frame, frame_sample_number, initial_sample, export_root, params)
 
 
 #--------------------------------------------------------------------------------------------------
@@ -519,11 +519,15 @@ class MMesh(MTransformChild):
                 else:
                     self.generic_materials.append(MGenericMaterial(self.params, material_name))
 
-    def add_deform_sample(self, export_root, time):
+    def add_deform_sample(self, export_root, time, params):
         # if the shape current transform is visible, export;
         # otherwise skip export and just append a null
         if ms_commands.visible_in_hierarchy(self.transform.name):
-            file_name = '%s_%i_%i.obj' % (self.safe_short_name, self.id, time)
+            scene_filepath = cmds.file(q=True, sceneName=True)
+            scene_basename = os.path.splitext(os.path.basename(scene_filepath))[0]
+            if len(scene_basename) == 0:
+                scene_basename = "Untitled"
+            file_name = '%s_%s_%i_%i.obj' % (scene_basename, self.safe_short_name, self.id, time)
             output_file_path = os.path.join(ms_commands.GEO_DIR, file_name)
 
             # set file path as relative value
@@ -926,6 +930,7 @@ class MGenericMaterial():
         self.bump_multiplier = None
         self.refractive_index = None
         self.translucence = None
+        self.reflected_color = None
 
         self.textures = []
 
@@ -983,6 +988,14 @@ class MGenericMaterial():
                 self.textures.append(self.reflectivity)
             elif self.reflectivity.is_black:
                 self.reflectivity = None
+
+        if cmds.attributeQuery('reflectedColor', node=self.name, exists=True):
+            self.reflected_color = MColorConnection(self.params, self.name + '.reflectedColor')
+            if self.reflected_color.connected_node is not None:
+                self.reflected_color = m_file_from_color_connection(self.params, self.reflectivity)
+                self.textures.append(self.reflectivity)
+            elif self.reflected_color.is_black:
+                self.reflected_color = None
 
         # work out alpha / transparrency component
         if cmds.attributeQuery('transparency', node=self.name, exists=True):
@@ -2302,7 +2315,7 @@ def construct_transform_descendents(params, root_assembly, parent_assembly, matr
                 sample_index += 1
 
         for transform in maya_transform.child_transforms:
-            construct_transform_descendents(params, root_assembly, current_assembly, current_matrix_stack, transform, mb_sample_number_list, non_mb_sample_number, camera_blur, transformation_blur, object_blur)
+            construct_transform_descendents(params, root_assembly, current_assembly, current_matrix_stack, transform, mb_sample_number_list, non_mb_sample_number, camera_blur, transformation_blur, object_blur, render_layer_list)
 
         for light in maya_transform.child_lights:
 
@@ -2538,7 +2551,8 @@ def convert_maya_generic_material(params, root_assembly, generic_material, non_m
                         'reflectivity'     : generic_material.reflectivity,
                         'bump_map'         : generic_material.bump_map,
                         'bump_multiplier'  : generic_material.bump_multiplier,
-                        'translucence'     : generic_material.translucence}
+                        'translucence'     : generic_material.translucence,
+                        'reflected_color'  : generic_material.reflected_color}
 
     for key in material_attribs.keys():
         if material_attribs[key] is not None:
